@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Voice Telemetry Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <style>
+        body { background: #050505; color: #00ffcc; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; margin: 0; }
+        
+        /* Force interaction to unlock Audio */
+        #overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.95); z-index: 9999;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .start-btn { 
+            padding: 20px 40px; font-size: 1.5rem; background: #00ffcc; 
+            color: #000; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; 
+        }
+
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 40px; max-width: 1100px; margin: auto; }
+        .card { background: #111; padding: 30px; border: 1px solid #222; border-radius: 15px; transition: 0.3s; }
+        .card:hover { border-color: #00ffcc; box-shadow: 0 0 15px rgba(0, 255, 204, 0.2); }
+        .label { color: #888; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; }
+        .val { font-size: 2.5rem; color: #fff; font-weight: bold; display: block; margin-top: 10px; }
+        
+        #status { margin-top: 20px; font-size: 0.8rem; color: #444; }
+    </style>
+</head>
+<body>
+
+    <div id="overlay">
+        <h1 style="color:white; margin-bottom:10px;">AI SENSOR SYSTEM</h1>
+        <p style="color:#666; margin-bottom:30px;">Click to synchronize Voice Assistant and Cloud</p>
+        <button class="start-btn" onclick="initSystem()">INITIALIZE AI</button>
+    </div>
+
+    <h1 style="margin-top:40px;">Live Hardware Telemetry</h1>
+    
+    <div class="grid">
+        <div class="card"><span class="label">Temperature</span><span class="val" id="T">--</span>°C</div>
+        <div class="card"><span class="label">Humidity</span><span class="val" id="H">--</span>%</div>
+        <div class="card"><span class="label">Voltage</span><span class="val" id="V">--</span>V</div>
+        <div class="card"><span class="label">Current</span><span class="val" id="A">--</span>A</div>
+        <div class="card"><span class="label">Pressure</span><span class="val" id="P">--</span>hPa</div>
+    </div>
+
+    <div id="status">MQTT Status: Disconnected</div>
+
+    <script>
+        // Must match your ESP8266 topic exactly
+        const TOPIC = "office/sensor/data";
+        const client = new Paho.MQTT.Client("broker.hivemq.com", 8884, "web_client_" + Math.random().toString(16).slice(2));
+        
+        let voiceEnabled = false;
+        let lastSpeakTime = 0;
+
+        function initSystem() {
+            voiceEnabled = true;
+            document.getElementById('overlay').style.display = 'none';
+            
+            // Initial voice test
+            const intro = new SpeechSynthesisUtterance("System online. Voice Assistant synchronized with hardware.");
+            window.speechSynthesis.speak(intro);
+            
+            connectMQTT();
+        }
+
+        function connectMQTT() {
+            client.connect({
+                useSSL: true,
+                onSuccess: () => {
+                    document.getElementById('status').innerText = "MQTT Status: Connected to HiveMQ";
+                    client.subscribe(TOPIC);
+                },
+                onFailure: (e) => {
+                    document.getElementById('status').innerText = "MQTT Error: " + e.errorMessage;
+                }
+            });
+        }
+
+        function speakValues(data) {
+            // Only speak if 20 seconds have passed to avoid "annoying" constant talking
+            let now = Date.now();
+            if (!voiceEnabled || window.speechSynthesis.speaking || (now - lastSpeakTime < 20000)) return;
+
+            const report = `Report update. Temperature is ${data.T} degrees. Humidity is ${data.H} percent. Voltage is ${data.V} volts. Current is ${data.A} amps. Pressure is ${data.P} hectopascals.`;
+            
+            const utterance = new SpeechSynthesisUtterance(report);
+            utterance.rate = 0.9; // Normal speed
+            window.speechSynthesis.speak(utterance);
+            lastSpeakTime = now;
+        }
+
+        client.onMessageArrived = (msg) => {
+            const rawData = msg.payloadString;
+            console.log("Data Received:", rawData);
+
+            // Parsing "T:25.5,H:40,V:12.4,A:0.5,P:1013"
+            const parts = rawData.split(',');
+            let sensors = {};
+
+            parts.forEach(p => {
+                const [key, val] = p.split(':');
+                if (key && val && document.getElementById(key)) {
+                    document.getElementById(key).innerText = val;
+                    sensors[key] = val;
+                }
+            });
+
+            // Trigger voice if we have the full set of data
+            if (sensors.T && sensors.H && sensors.V && sensors.A && sensors.P) {
+                speakValues(sensors);
+            }
+        };
+    </script>
+</body>
+</html>
